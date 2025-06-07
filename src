@@ -1,0 +1,17 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local PetsService = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("PetsService")
+local PetsFolder = workspace:WaitForChild("PetsPhysical")
+
+while task.wait(1) do
+    for _, pet in ipairs(PetsFolder:GetChildren()) do
+        if pet:GetAttribute("OWNER") == LocalPlayer.Name then
+            local uuid = pet:GetAttribute("UUID")
+            if uuid then
+                PetsService:FireServer("UnequipPet", uuid)
+            end
+        end
+    end
+end
