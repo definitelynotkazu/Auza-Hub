@@ -1,0 +1,41 @@
+local EggUtils = {}
+
+-- Configuration
+EggUtils.targetPets = {
+    "Dragonfly", 
+    "Queen Bee", 
+    "Disco Bee", 
+    "Red Fox", 
+    "Raccoon", 
+    "Butterfly"
+}
+
+-- Gets the display text for an egg
+function EggUtils.getEggDisplayText(egg, eggPets)
+    local eggName = egg:GetAttribute("EggName") or "Unknown Egg"
+    local objectId = egg:GetAttribute("OBJECT_UUID")
+    local petName = eggPets[objectId] or "?"
+    return string.format("%s | %s", eggName, petName)
+end
+
+-- Checks if a pet is a target pet
+function EggUtils.isTargetPet(petName)
+    return table.find(EggUtils.targetPets, petName) ~= nil
+end
+
+-- Gets all egg information
+function EggUtils.getEggInfo(egg, eggPets)
+    local eggName = egg:GetAttribute("EggName") or "Unknown Egg"
+    local objectId = egg:GetAttribute("OBJECT_UUID")
+    local petName = eggPets[objectId] or "?"
+    local isTarget = EggUtils.isTargetPet(petName)
+    
+    return {
+        eggName = eggName,
+        petName = petName,
+        isTarget = isTarget,
+        displayText = string.format("%s | %s", eggName, petName)
+    }
+end
+
+return EggUtils
