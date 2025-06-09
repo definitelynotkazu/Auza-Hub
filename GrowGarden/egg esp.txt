@@ -1,0 +1,447 @@
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local collectionService = game:GetService("CollectionService")
+local players = game:GetService("Players")
+local runService = game:GetService("RunService")
+local tweenService = game:GetService("TweenService")
+local userInputService = game:GetService("UserInputService")
+
+local localPlayer = players.LocalPlayer
+local currentCamera = workspace.CurrentCamera
+
+-- Get hatch function data
+local hatchFunction = getupvalue(getupvalue(getconnections(replicatedStorage.GameEvents.PetEggService.OnClientEvent)[1].Function, 1), 2)
+local eggModels = getupvalue(hatchFunction, 1)
+local eggPets = getupvalue(hatchFunction, 2)
+
+-- ESP and target pet configuration
+local espCache = {}
+local activeEggs = {}
+local targetPets = {"Dragonfly", "Queen Bee", "Disco Bee", "Red Fox", "Raccoon", "Butterfly"}
+local foundTargetPet = false
+local targetPetName = ""
+
+-- UI Creation
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AuzaHub"
+screenGui.Parent = game:GetService("CoreGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 220) -- Increased height for better scrolling
+mainFrame.Position = UDim2.new(0.5, -150, 0.5, -110)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+mainFrame.BackgroundTransparency = 0.2
+mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = screenGui
+
+-- Make frame draggable (works for both mobile and desktop)
+local dragInput, dragStart, startPos
+local function updateInput(input)
+    local delta = input.Position - dragStart
+    local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    
+    -- Keep frame within screen bounds
+    local absPos = newPos + UDim2.fromOffset(mainFrame.AbsoluteSize.X/2, mainFrame.AbsoluteSize.Y/2)
+    if absPos.X.Offset < 0 then newPos = UDim2.new(newPos.X.Scale, -mainFrame.AbsoluteSize.X/2, newPos.Y.Scale, newPos.Y.Offset) end
+    if absPos.Y.Offset < 0 then newPos = UDim2.new(newPos.X.Scale, newPos.X.Offset, newPos.Y.Scale, -mainFrame.AbsoluteSize.Y/2) end
+    if absPos.X.Offset > workspace.CurrentCamera.ViewportSize.X then 
+        newPos = UDim2.new(newPos.X.Scale, workspace.CurrentCamera.ViewportSize.X - mainFrame.AbsoluteSize.X/2, newPos.Y.Scale, newPos.Y.Offset) 
+    end
+    if absPos.Y.Offset > workspace.CurrentCamera.ViewportSize.Y then 
+        newPos = UDim2.new(newPos.X.Scale, newPos.X.Offset, newPos.Y.Scale, workspace.CurrentCamera.ViewportSize.Y - mainFrame.AbsoluteSize.Y/2) 
+    end
+    
+    mainFrame.Position = newPos
+end
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragStart = nil
+            end
+        end)
+    end
+end)
+
+userInputService.InputChanged:Connect(function(input)
+    if (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) and dragStart then
+        updateInput(input)
+    end
+end)
+
+-- Corner and shadow effects
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = mainFrame
+
+local shadow = Instance.new("ImageLabel")
+shadow.Name = "Shadow"
+shadow.Image = "rbxassetid://1316045217"
+shadow.ImageColor3 = Color3.new(0, 0, 0)
+shadow.ImageTransparency = 0.8
+shadow.ScaleType = Enum.ScaleType.Slice
+shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+shadow.Size = UDim2.new(1, 12, 1, 12)
+shadow.Position = UDim2.new(0, -6, 0, -6)
+shadow.BackgroundTransparency = 1
+shadow.Parent = mainFrame
+shadow.ZIndex = -1
+
+-- Title bar
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 30)
+titleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = titleBar
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Text = "Auza Hub | Made by iKazu"
+title.Size = UDim2.new(1, -10, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.TextColor3 = Color3.fromRGB(220, 220, 220)
+title.Font = Enum.Font.GothamSemibold
+title.TextSize = 14
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = titleBar
+
+-- Status display with scrolling
+local statusContainer = Instance.new("Frame")
+statusContainer.Name = "StatusContainer"
+statusContainer.Size = UDim2.new(1, -20, 0, 120)
+statusContainer.Position = UDim2.new(0, 10, 0, 40)
+statusContainer.BackgroundTransparency = 1
+statusContainer.Parent = mainFrame
+
+local statusScroll = Instance.new("ScrollingFrame")
+statusScroll.Name = "StatusScroll"
+statusScroll.Size = UDim2.new(1, 0, 1, 0)
+statusScroll.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+statusScroll.BackgroundTransparency = 0.5
+statusScroll.BorderSizePixel = 0
+statusScroll.ScrollBarThickness = 5
+statusScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+statusScroll.Parent = statusContainer
+
+local statusCorner = Instance.new("UICorner")
+statusCorner.CornerRadius = UDim.new(0, 6)
+statusCorner.Parent = statusScroll
+
+local statusLayout = Instance.new("UIListLayout")
+statusLayout.Padding = UDim.new(0, 5)
+statusLayout.Parent = statusScroll
+
+local statusPadding = Instance.new("UIPadding")
+statusPadding.PaddingLeft = UDim.new(0, 5)
+statusPadding.PaddingTop = UDim.new(0, 5)
+statusPadding.Parent = statusScroll
+
+-- Buttons
+local buttonFrame = Instance.new("Frame")
+buttonFrame.Name = "ButtonFrame"
+buttonFrame.Size = UDim2.new(1, -20, 0, 30)
+buttonFrame.Position = UDim2.new(0, 10, 0, 170)
+buttonFrame.BackgroundTransparency = 1
+buttonFrame.Parent = mainFrame
+
+local rejoinButton = Instance.new("TextButton")
+rejoinButton.Name = "RejoinButton"
+rejoinButton.Text = "Rejoin Game"
+rejoinButton.Size = UDim2.new(0.48, 0, 1, 0)
+rejoinButton.Position = UDim2.new(0, 0, 0, 0)
+rejoinButton.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+rejoinButton.TextColor3 = Color3.fromRGB(220, 220, 220)
+rejoinButton.Font = Enum.Font.Gotham
+rejoinButton.TextSize = 12
+rejoinButton.Parent = buttonFrame
+
+local rejoinCorner = Instance.new("UICorner")
+rejoinCorner.CornerRadius = UDim.new(0, 6)
+rejoinCorner.Parent = rejoinButton
+
+local discordButton = Instance.new("TextButton")
+discordButton.Name = "DiscordButton"
+discordButton.Text = "Join Discord"
+discordButton.Size = UDim2.new(0.48, 0, 1, 0)
+discordButton.Position = UDim2.new(0.52, 0, 0, 0)
+discordButton.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+discordButton.TextColor3 = Color3.fromRGB(220, 220, 220)
+discordButton.Font = Enum.Font.Gotham
+discordButton.TextSize = 12
+discordButton.Parent = buttonFrame
+
+local discordCorner = Instance.new("UICorner")
+discordCorner.CornerRadius = UDim.new(0, 6)
+discordCorner.Parent = discordButton
+
+-- Button animations
+local function animateButton(button)
+    button.MouseEnter:Connect(function()
+        tweenService:Create(button, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(90, 90, 110)}):Play()
+    end)
+    
+    button.MouseLeave:Connect(function()
+        tweenService:Create(button, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(70, 70, 90)}):Play()
+    end)
+    
+    button.MouseButton1Down:Connect(function()
+        tweenService:Create(button, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(50, 50, 70)}):Play()
+    end)
+    
+    button.MouseButton1Up:Connect(function()
+        tweenService:Create(button, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(90, 90, 110)}):Play()
+    end)
+end
+
+animateButton(rejoinButton)
+animateButton(discordButton)
+
+-- Notification function
+local function showNotification(message)
+    local notification = Instance.new("TextLabel")
+    notification.Name = "Notification"
+    notification.Text = message
+    notification.Size = UDim2.new(1, -20, 0, 30)
+    notification.Position = UDim2.new(0, 10, 0, -40)
+    notification.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    notification.TextColor3 = Color3.fromRGB(255, 255, 255)
+    notification.Font = Enum.Font.Gotham
+    notification.TextSize = 12
+    notification.Parent = mainFrame
+    
+    local notifCorner = Instance.new("UICorner")
+    notifCorner.CornerRadius = UDim.new(0, 6)
+    notifCorner.Parent = notification
+    
+    tweenService:Create(notification, TweenInfo.new(0.3), {Position = UDim2.new(0, 10, 0, 10)}):Play()
+    task.wait(3)
+    tweenService:Create(notification, TweenInfo.new(0.3), {Position = UDim2.new(0, 10, 0, -40)}):Play()
+    task.wait(0.3)
+    notification:Destroy()
+end
+
+-- Button functionality
+rejoinButton.MouseButton1Click:Connect(function()
+    if foundTargetPet then
+        showNotification("Target "..targetPetName.." found!")
+        return
+    end
+    
+    game:GetService("TeleportService"):Teleport(game.PlaceId)
+end)
+
+discordButton.MouseButton1Click:Connect(function()
+    setclipboard("https://discord.gg/dZHpM5U5Dq")
+    showNotification("Discord link copied!")
+end)
+
+-- Update status function with egg list
+local function updateStatus()
+    -- Clear existing status labels
+    for _, child in ipairs(statusScroll:GetChildren()) do
+        if child:IsA("TextLabel") then
+            child:Destroy()
+        end
+    end
+    
+    -- Add header
+    local header = Instance.new("TextLabel")
+    header.Name = "Header"
+    header.Text = "Eggs ("..#activeEggs.."):"
+    header.Size = UDim2.new(1, -5, 0, 20)
+    header.BackgroundTransparency = 1
+    header.TextColor3 = Color3.fromRGB(220, 220, 220)
+    header.Font = Enum.Font.GothamSemibold
+    header.TextSize = 12
+    header.TextXAlignment = Enum.TextXAlignment.Left
+    header.Parent = statusScroll
+    
+    -- Add each egg with its pet name
+    for objectId, object in pairs(activeEggs) do
+        if not object or not object:IsDescendantOf(workspace) then continue end
+        
+        local eggName = object:GetAttribute("EggName") or "Unknown Egg"
+        local petName = eggPets[object:GetAttribute("OBJECT_UUID")] or "?"
+        
+        local eggLabel = Instance.new("TextLabel")
+        eggLabel.Name = objectId
+        eggLabel.Text = "• "..eggName.." | "..petName
+        eggLabel.Size = UDim2.new(1, -10, 0, 15)
+        eggLabel.BackgroundTransparency = 1
+        eggLabel.TextColor3 = table.find(targetPets, petName) and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(220, 220, 220)
+        eggLabel.Font = Enum.Font.Gotham
+        eggLabel.TextSize = 11
+        eggLabel.TextXAlignment = Enum.TextXAlignment.Left
+        eggLabel.Parent = statusScroll
+        
+        -- Check if this is one of our target pets
+        if table.find(targetPets, petName) then
+            foundTargetPet = true
+            targetPetName = petName
+        end
+    end
+    
+    -- Update scroll size
+    task.wait()
+    statusScroll.CanvasSize = UDim2.new(0, 0, 0, statusLayout.AbsoluteContentSize.Y + 10)
+end
+
+-- ESP Functions
+local function getObjectFromId(objectId)
+    for eggModel in eggModels do
+        if eggModel:GetAttribute("OBJECT_UUID") ~= objectId then continue end
+        return eggModel
+    end
+end
+
+local function UpdateEsp(objectId, petName)
+    local object = getObjectFromId(objectId)
+    if not object or not espCache[objectId] then return end
+
+    local eggName = object:GetAttribute("EggName")
+    espCache[objectId].Text = `{eggName} | {petName}`
+    
+    -- Update status display
+    updateStatus()
+    
+    -- Check if this is one of our target pets
+    if table.find(targetPets, petName) then
+        foundTargetPet = true
+        targetPetName = petName
+        showNotification("Target "..petName.." found!")
+    end
+end
+
+local function AddEsp(object)
+    if object:GetAttribute("OWNER") ~= localPlayer.Name then return end
+
+    local eggName = object:GetAttribute("EggName")
+    local petName = eggPets[object:GetAttribute("OBJECT_UUID")]
+   
+    local objectId = object:GetAttribute("OBJECT_UUID")
+    if not objectId then return end
+
+    local label = Drawing.new("Text")
+    label.Text = `{eggName} | {petName or "?"}`
+    label.Size = 18
+    label.Color = Color3.new(1, 1, 1)
+    label.Outline = true
+    label.OutlineColor = Color3.new(0, 0, 0)
+    label.Center = true
+    label.Visible = false
+
+    espCache[objectId] = label
+    activeEggs[objectId] = object
+    
+    -- Update status display
+    updateStatus()
+    
+    -- Check if this is one of our target pets
+    if table.find(targetPets, petName) then
+        foundTargetPet = true
+        targetPetName = petName
+        showNotification("Target "..petName.." found!")
+    end
+end
+
+local function RemoveEsp(object)
+    if object:GetAttribute("OWNER") ~= localPlayer.Name then return end
+
+    local objectId = object:GetAttribute("OBJECT_UUID")
+    if espCache[objectId] then
+        espCache[objectId]:Remove()
+        espCache[objectId] = nil
+    end
+   
+    activeEggs[objectId] = nil
+    updateStatus()
+end
+
+local function UpdateAllEsp()
+    for objectId, object in activeEggs do
+        if not object or not object:IsDescendantOf(workspace) then
+            activeEggs[objectId] = nil
+            if espCache[objectId] then
+                espCache[objectId].Visible = false
+            end
+            continue
+        end
+
+        local label = espCache[objectId]
+        if label then
+            local pos, onScreen = currentCamera:WorldToViewportPoint(object:GetPivot().Position)
+            if onScreen then
+                label.Position = Vector2.new(pos.X, pos.Y)
+                label.Visible = true
+            else
+                label.Visible = false
+            end
+        end
+    end
+end
+
+-- Initialize ESP for existing eggs
+for _, object in collectionService:GetTagged("PetEggServer") do
+    task.spawn(AddEsp, object)
+end
+
+collectionService:GetInstanceAddedSignal("PetEggServer"):Connect(AddEsp)
+collectionService:GetInstanceRemovedSignal("PetEggServer"):Connect(RemoveEsp)
+
+-- Hook function for egg updates
+local function setupHook()
+    local success, connections = pcall(function()
+        return getconnections(replicatedStorage.GameEvents.EggReadyToHatch_RE.OnClientEvent)
+    end)
+    
+    if not success or not connections or #connections == 0 then
+        replicatedStorage.GameEvents.EggReadyToHatch_RE.OnClientEvent:Connect(function(objectId, petName)
+            UpdateEsp(objectId, petName)
+        end)
+        return
+    end
+    
+    local targetFunction = connections[1].Function
+    if not targetFunction then
+        replicatedStorage.GameEvents.EggReadyToHatch_RE.OnClientEvent:Connect(function(objectId, petName)
+            UpdateEsp(objectId, petName)
+        end)
+        return
+    end
+    
+    local functionInfo = debug.getinfo(targetFunction)
+    if functionInfo and functionInfo.what == "C" then
+        replicatedStorage.GameEvents.EggReadyToHatch_RE.OnClientEvent:Connect(function(objectId, petName)
+            UpdateEsp(objectId, petName)
+        end)
+        return
+    end
+    
+    local success2, old = pcall(hookfunction, targetFunction, newcclosure(function(objectId, petName)
+        UpdateEsp(objectId, petName)
+        return old(objectId, petName)
+    end))
+    
+    if not success2 then
+        replicatedStorage.GameEvents.EggReadyToHatch_RE.OnClientEvent:Connect(function(objectId, petName)
+            UpdateEsp(objectId, petName)
+        end)
+    end
+end
+
+setupHook()
+
+-- Main update loop
+runService.PreRender:Connect(UpdateAllEsp)
+updateStatus()
